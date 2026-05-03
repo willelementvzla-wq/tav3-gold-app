@@ -1,104 +1,200 @@
 """
-TAV3-ST-QQE GOLD - Triple Confirmation Pro
-App web con Streamlit para analisis del Oro (XAU/USD)
-Datos 100% reales via Yahoo Finance
+TAV3-ST-QQE GOLD PRO v2 — TradingView-style web app
+Indicadores: A-V2, Supertrend, QQE Mod, ADX, Bollinger, EMA20/100, Estocástico
+Sesiones: Sídney, Tokio, Londres, Nueva York
+Sonido en cada señal nueva. Datos 100% reales (Yahoo Finance).
 """
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime
+from datetime import datetime, timedelta, time as dtime
+import pytz
 import warnings
 warnings.filterwarnings('ignore')
 
 # ============================================================
-# PAGE CONFIG
+# PAGE CONFIG (estilo TradingView, compacto)
 # ============================================================
 st.set_page_config(
     page_title="TAV3 GOLD Pro",
     page_icon="🥇",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
+# CSS estilo TradingView: oscuro, compacto, fuentes pequeñas
 st.markdown("""
 <style>
-    .main { padding-top: 0.5rem; }
-    .block-container { padding-top: 1rem; padding-bottom: 0rem; max-width: 100%; }
-    [data-testid="stMetricValue"] { font-size: 1.1rem; }
-    [data-testid="stMetricLabel"] { font-size: 0.75rem; color: #888; }
-    .stAlert { padding: 0.5rem 1rem; }
-    h1 { font-size: 1.8rem !important; padding-bottom: 0.3rem; }
-    h2 { font-size: 1.3rem !important; padding-top: 0.5rem; padding-bottom: 0.3rem; }
+    /* Reducir todo el padding */
+    .main { padding: 0rem 0rem 0rem 0rem !important; }
+    .block-container {
+        padding: 0.3rem 0.6rem 0rem 0.6rem !important;
+        max-width: 100% !important;
+    }
+    /* Header oculto */
+    header[data-testid="stHeader"] { height: 0px; display: none; }
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+
+    /* Métricas TradingView-style: pequeñas y compactas */
+    [data-testid="stMetricValue"] { font-size: 0.95rem !important; font-weight: 700; }
+    [data-testid="stMetricLabel"] { font-size: 0.65rem !important; color: #787b86 !important; text-transform: uppercase; letter-spacing: 0.5px; }
+    [data-testid="stMetricDelta"] { font-size: 0.7rem !important; }
+
+    /* Sidebar más compacto */
+    section[data-testid="stSidebar"] > div { padding-top: 1rem; }
+    section[data-testid="stSidebar"] .stSelectbox label,
+    section[data-testid="stSidebar"] .stSlider label,
+    section[data-testid="stSidebar"] .stCheckbox label {
+        font-size: 0.75rem !important;
+    }
+
+    /* Títulos más pequeños */
+    h1 { font-size: 1.1rem !important; padding: 0 !important; margin: 0.2rem 0 !important; color: #d1d4dc; font-weight: 600; }
+    h2 { font-size: 0.95rem !important; padding: 0 !important; margin: 0.2rem 0 !important; }
+    h3 { font-size: 0.85rem !important; padding: 0 !important; margin: 0.2rem 0 !important; }
+
+    /* Alertas más compactas */
+    .stAlert { padding: 0.3rem 0.7rem !important; font-size: 0.8rem !important; }
+
+    /* Background TradingView */
+    .stApp { background-color: #131722; }
+
+    /* Expander */
+    .streamlit-expanderHeader { font-size: 0.8rem !important; padding: 0.3rem !important; }
+
+    /* Tabla compacta */
+    [data-testid="stDataFrame"] { font-size: 0.75rem; }
+
+    /* Caption */
+    .caption-tv { font-size: 0.7rem; color: #787b86; }
+
+    /* Toolbar compact */
+    div[data-testid="column"] { padding: 0.1rem 0.2rem !important; }
+
+    /* Top status bar */
+    .status-bar {
+        background: #1e222d;
+        padding: 0.4rem 0.8rem;
+        border-radius: 4px;
+        border: 1px solid #2a2e39;
+        font-size: 0.75rem;
+        color: #d1d4dc;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .session-active {
+        background: linear-gradient(90deg, #26a69a 0%, #1e8e7d 100%);
+        color: white;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-weight: 600;
+        font-size: 0.7rem;
+    }
+    .session-closed {
+        background: #363a45;
+        color: #787b86;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================================
-# SIDEBAR
+# AUTO-REFRESH (vivo)
+# ============================================================
+# Cada 30 segundos refresca la página completa
+components.html("""
+<script>
+    setTimeout(function(){
+        window.parent.location.reload();
+    }, 30000);
+</script>
+""", height=0)
+
+# ============================================================
+# SIDEBAR (compacto)
 # ============================================================
 with st.sidebar:
-    st.title("⚙️ Configuración")
+    st.markdown("### ⚙️ Config")
 
     sym_options = {
-        "GC=F (Gold Futures COMEX)": "GC=F",
+        "GC=F (Gold Futures)": "GC=F",
         "XAUUSD=X (Spot Gold)": "XAUUSD=X",
-        "GLD (ETF SPDR Gold)": "GLD",
+        "GLD (ETF Gold)": "GLD",
     }
     sym_label = st.selectbox("Símbolo", list(sym_options.keys()), index=0)
     sym_code = sym_options[sym_label]
 
     tf_options = {
-        "1 minuto": (1, "5d"),
-        "3 minutos ⭐": (3, "5d"),
-        "5 minutos": (5, "30d"),
-        "15 minutos": (15, "60d"),
-        "30 minutos": (30, "60d"),
-        "1 hora": (60, "180d"),
-        "4 horas": (240, "365d"),
-        "1 día": (1440, "730d"),
+        "1m": (1, "5d"),
+        "3m ⭐": (3, "5d"),
+        "5m": (5, "30d"),
+        "15m": (15, "60d"),
+        "30m": (30, "60d"),
+        "1h": (60, "180d"),
+        "4h": (240, "365d"),
+        "1D": (1440, "730d"),
     }
     tf_label = st.selectbox("Temporalidad", list(tf_options.keys()), index=1)
     tf_minutes, period = tf_options[tf_label]
 
-    candles_to_show = st.slider("Velas a mostrar", 50, 500, 200, 25)
+    candles_to_show = st.slider("Velas", 50, 500, 200, 25)
 
-    st.divider()
-    st.subheader("Parámetros")
-    ma_period = st.slider("MA Period (A-V2)", 10, 100, 52)
-    ma_smooth = st.slider("MA Smoothing", 5, 30, 10)
-    st_period = st.slider("ATR Period (Supertrend)", 5, 20, 10)
-    st_mult = st.slider("ATR Multiplier", 1.0, 5.0, 3.0, 0.1)
-    adx_threshold = st.slider("ADX umbral fuerza", 15, 35, 20)
-    use_daily = st.checkbox("Filtro tendencia diaria", value=True)
-    show_st_lines = st.checkbox("Líneas Supertrend", value=True)
+    st.markdown("##### 📊 Indicadores")
+    show_bb = st.checkbox("Bollinger Bands (20, 2)", value=True)
+    show_ema20 = st.checkbox("EMA 20", value=True)
+    show_ema100 = st.checkbox("EMA 100", value=True)
+    show_st_lines = st.checkbox("Supertrend", value=True)
+    show_cloud = st.checkbox("Nube A-V2", value=True)
     show_signals = st.checkbox("Señales BUY/SELL", value=True)
+    show_sessions = st.checkbox("Líneas sesiones", value=True)
+
+    st.markdown("##### 🔧 Parámetros")
+    ma_period = st.slider("MA A-V2", 10, 100, 52)
+    ma_smooth = st.slider("MA Smooth", 5, 30, 10)
+    st_period = st.slider("ATR Period", 5, 20, 10)
+    st_mult = st.slider("ATR Mult", 1.0, 5.0, 3.0, 0.1)
+    adx_threshold = st.slider("ADX umbral", 15, 35, 20)
+    bb_period = st.slider("BB Period", 10, 50, 20)
+    bb_std = st.slider("BB Std", 1.0, 3.0, 2.0, 0.1)
+    stoch_k = st.slider("Stoch %K", 5, 30, 14)
+    stoch_d = st.slider("Stoch %D", 1, 10, 3)
+
+    use_daily = st.checkbox("Filtro tendencia diaria", value=True)
+    sound_on = st.checkbox("🔔 Sonido en señales", value=True)
 
     st.divider()
-    if st.button("🔄 Actualizar datos", use_container_width=True, type="primary"):
+    if st.button("🔄 Refresh", use_container_width=True, type="primary"):
         st.cache_data.clear()
         st.rerun()
 
-    st.caption(f"⏱️ Última actualización: {datetime.now().strftime('%H:%M:%S')}")
-
 # ============================================================
-# DATA FETCH (100% real desde Yahoo Finance)
+# DATA FETCH
 # ============================================================
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def fetch_data(symbol, period, interval):
     df = yf.download(symbol, period=period, interval=interval,
-                      progress=False, auto_adjust=False, prepost=False)
+                     progress=False, auto_adjust=False, prepost=True)
     if df.empty:
         return df
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     df = df.dropna()
+    if df.index.tz is None:
+        df.index = df.index.tz_localize('UTC')
+    else:
+        df.index = df.index.tz_convert('UTC')
     return df
 
 def get_data(sym, tf_min, period):
-    """Yahoo soporta: 1m, 2m, 5m, 15m, 30m, 60m/1h, 1d
-       Para 3m y 4h hacemos resample"""
     try:
         if tf_min == 1:
             return fetch_data(sym, period, "1m")
@@ -119,16 +215,15 @@ def get_data(sym, tf_min, period):
         else:
             return fetch_data(sym, period, "1d")
     except Exception as e:
-        st.error(f"Error al cargar datos: {e}")
+        st.error(f"Error: {e}")
         return pd.DataFrame()
 
 # ============================================================
-# INDICADORES (port fiel del Pine Script)
+# INDICADORES
 # ============================================================
 def heikin_ashi(df):
     ha = pd.DataFrame(index=df.index)
     ha['close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
-    ha['open'] = 0.0
     open_arr = np.zeros(len(df))
     open_arr[0] = (df['Open'].iloc[0] + df['Close'].iloc[0]) / 2
     close_arr = ha['close'].values
@@ -149,8 +244,6 @@ def supertrend(df, period, multiplier):
     high, low, close = df['High'].values, df['Low'].values, df['Close'].values
     n = len(df)
     hl2 = (high + low) / 2
-
-    # ATR (Wilder)
     tr = np.zeros(n)
     tr[0] = high[0] - low[0]
     for i in range(1, n):
@@ -193,12 +286,11 @@ def rsi(close, period):
 def qqe_mod(close, rsi_period=6, sf=5, qqe_factor=3.0,
             bb_length=50, bb_mult=0.35,
             rsi_period2=6, sf2=5, threshhold2=3):
-    """Port del QQE Mod de Mihkel00"""
     n = len(close)
-    wilders = rsi_period * 2 - 1
     rsi_v = rsi(close, rsi_period)
     rsi_ma = rsi_v.ewm(span=sf, adjust=False).mean()
     atr_rsi = (rsi_ma.shift() - rsi_ma).abs()
+    wilders = rsi_period * 2 - 1
     ma_atr = atr_rsi.ewm(span=wilders, adjust=False).mean()
     dar = ma_atr.ewm(span=wilders, adjust=False).mean() * qqe_factor
 
@@ -242,8 +334,7 @@ def qqe_mod(close, rsi_period=6, sf=5, qqe_factor=3.0,
 
     blue_bar = ((rsi_ma2 - 50) > threshhold2) & ((rsi_ma - 50) > upper_b)
     red_bar = ((rsi_ma2 - 50) < -threshhold2) & ((rsi_ma - 50) < lower_b)
-
-    return blue_bar.fillna(False), red_bar.fillna(False), rsi_ma, rsi_ma2
+    return blue_bar.fillna(False), red_bar.fillna(False)
 
 def adx_dmi(df, period=14):
     high, low, close = df['High'], df['Low'], df['Close']
@@ -254,7 +345,6 @@ def adx_dmi(df, period=14):
     mask = plus_dm > minus_dm
     plus_dm = plus_dm.where(mask, 0)
     minus_dm = minus_dm.where(~mask, 0)
-
     tr = pd.concat([high - low,
                     (high - close.shift()).abs(),
                     (low - close.shift()).abs()], axis=1).max(axis=1)
@@ -264,6 +354,20 @@ def adx_dmi(df, period=14):
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-10)
     adx_v = dx.ewm(alpha=1/period, adjust=False).mean()
     return adx_v, plus_di, minus_di
+
+def bollinger(close, period, std_mult):
+    basis = close.rolling(period, min_periods=1).mean()
+    dev = close.rolling(period, min_periods=1).std()
+    upper = basis + std_mult * dev
+    lower = basis - std_mult * dev
+    return basis, upper, lower
+
+def stochastic(df, k_period, d_period):
+    low_min = df['Low'].rolling(k_period, min_periods=1).min()
+    high_max = df['High'].rolling(k_period, min_periods=1).max()
+    k = 100 * (df['Close'] - low_min) / (high_max - low_min).replace(0, 1e-10)
+    d = k.rolling(d_period, min_periods=1).mean()
+    return k, d
 
 def daily_trend(df_d, fast=20, slow=50):
     if len(df_d) < slow + 5:
@@ -282,34 +386,104 @@ def daily_trend(df_d, fast=20, slow=50):
     return trend, pct_change
 
 # ============================================================
+# SESIONES DE TRADING (UTC)
+# Sídney 22:00-07:00 / Tokio 00:00-09:00 / Londres 08:00-17:00 / NY 13:00-22:00
+# ============================================================
+def get_session_now():
+    """Retorna lista de sesiones activas ahora (UTC)"""
+    now_utc = datetime.now(pytz.UTC)
+    h = now_utc.hour
+    weekday = now_utc.weekday()
+    # Mercado cerrado fin de semana (sáb 22:00 UTC viernes - dom 22:00 UTC)
+    if weekday == 5:  # sábado
+        return []
+    if weekday == 6 and h < 22:  # domingo antes de Sídney
+        return []
+    if weekday == 4 and h >= 22:  # viernes después de NY
+        return []
+
+    sessions = []
+    if h >= 22 or h < 7:
+        sessions.append(("Sídney", "#FF6B35"))
+    if h >= 0 and h < 9:
+        sessions.append(("Tokio", "#FFD700"))
+    if h >= 8 and h < 17:
+        sessions.append(("Londres", "#4FC3F7"))
+    if h >= 13 and h < 22:
+        sessions.append(("Nueva York", "#9C27B0"))
+    return sessions
+
+def is_market_open():
+    """Mercado del oro: cerrado vie 22:00 UTC - dom 22:00 UTC"""
+    now_utc = datetime.now(pytz.UTC)
+    weekday = now_utc.weekday()
+    h = now_utc.hour
+    if weekday == 5:
+        return False
+    if weekday == 6 and h < 22:
+        return False
+    if weekday == 4 and h >= 22:
+        return False
+    return True
+
+def add_session_shading(fig, df_show):
+    """Agrega zonas de color por sesión en el gráfico"""
+    if df_show.empty:
+        return
+    start = df_show.index[0]
+    end = df_show.index[-1]
+    cur = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    sessions_def = [
+        # (start_h, end_h, color, name)
+        (22, 7,  "rgba(255,107,53,0.05)", "Sídney"),   # cruza medianoche
+        (0,  9,  "rgba(255,215,0,0.04)",  "Tokio"),
+        (8,  17, "rgba(79,195,247,0.06)", "Londres"),
+        (13, 22, "rgba(156,39,176,0.05)", "Nueva York"),
+    ]
+    while cur <= end + timedelta(days=1):
+        for sh, eh, col, name in sessions_def:
+            if sh > eh:  # Sídney cruza medianoche
+                s1 = cur.replace(hour=sh)
+                e1 = (cur + timedelta(days=1)).replace(hour=eh)
+            else:
+                s1 = cur.replace(hour=sh)
+                e1 = cur.replace(hour=eh)
+            if s1 > end or e1 < start:
+                continue
+            fig.add_vrect(x0=max(s1, start), x1=min(e1, end),
+                          fillcolor=col, layer="below", line_width=0,
+                          row=1, col=1)
+        cur += timedelta(days=1)
+
+# ============================================================
 # CARGAR DATOS
 # ============================================================
-with st.spinner("📡 Descargando datos del oro en tiempo real..."):
+with st.spinner("Cargando..."):
     df = get_data(sym_code, tf_minutes, period)
     df_daily = fetch_data(sym_code, "180d", "1d")
 
 if df.empty or len(df) < 100:
-    st.error("❌ No se pudieron cargar suficientes datos. Intenta otra temporalidad o más tarde.")
+    st.error("❌ No se cargaron datos. Cambia temporalidad o intenta más tarde.")
     st.stop()
 
 # ============================================================
-# CALCULAR INDICADORES
+# CALCULAR TODOS LOS INDICADORES
 # ============================================================
 ha = heikin_ashi(df)
 ha_o_ma = vwma(ha['open'], df['Volume'], ma_period)
 ha_c_ma = vwma(ha['close'], df['Volume'], ma_period)
-ha_h_ma = vwma(ha['high'], df['Volume'], ma_period)
-ha_l_ma = vwma(ha['low'], df['Volume'], ma_period)
 ha_o_smooth = vwma(ha_o_ma, df['Volume'], ma_smooth)
 ha_c_smooth = vwma(ha_c_ma, df['Volume'], ma_smooth)
-ha_h_smooth = vwma(ha_h_ma, df['Volume'], ma_smooth)
-ha_l_smooth = vwma(ha_l_ma, df['Volume'], ma_smooth)
 av2_bull = ha_c_smooth >= ha_o_smooth
 
 trend_st, st_upper, st_lower = supertrend(df, st_period, st_mult)
-blue_bar, red_bar, rsi_ma, rsi_ma2 = qqe_mod(df['Close'])
+blue_bar, red_bar = qqe_mod(df['Close'])
 adx_v, plus_di, minus_di = adx_dmi(df, 14)
 strong = adx_v >= adx_threshold
+ema20_v = df['Close'].ewm(span=20, adjust=False).mean()
+ema100_v = df['Close'].ewm(span=100, adjust=False).mean()
+bb_basis, bb_upper, bb_lower = bollinger(df['Close'], bb_period, bb_std)
+stoch_k_v, stoch_d_v = stochastic(df, stoch_k, stoch_d)
 
 d_trend, d_change = daily_trend(df_daily, 20, 50)
 ok_long = (not use_daily) or (d_trend >= 0)
@@ -317,43 +491,94 @@ ok_short = (not use_daily) or (d_trend <= 0)
 
 long_sig = av2_bull & (trend_st == 1) & blue_bar & strong & ok_long
 short_sig = (~av2_bull) & (trend_st == -1) & red_bar & strong & ok_short
-
 long_cond = long_sig & (~long_sig.shift(1).fillna(False))
 short_cond = short_sig & (~short_sig.shift(1).fillna(False))
 
 # ============================================================
-# HEADER + KPIs
+# DETECCIÓN DE NUEVA SEÑAL (para reproducir sonido)
 # ============================================================
-last_price = df['Close'].iloc[-1]
-prev_price = df['Close'].iloc[-2]
+last_long_idx = df.index[long_cond][-1] if long_cond.any() else None
+last_short_idx = df.index[short_cond][-1] if short_cond.any() else None
+
+last_signal_time = None
+last_signal_type = None
+if last_long_idx and last_short_idx:
+    if last_long_idx > last_short_idx:
+        last_signal_time, last_signal_type = last_long_idx, "BUY"
+    else:
+        last_signal_time, last_signal_type = last_short_idx, "SELL"
+elif last_long_idx:
+    last_signal_time, last_signal_type = last_long_idx, "BUY"
+elif last_short_idx:
+    last_signal_time, last_signal_type = last_short_idx, "SELL"
+
+# Señal "nueva": ocurrió en últimos N minutos según tf
+new_signal = False
+if last_signal_time:
+    age_min = (datetime.now(pytz.UTC) - last_signal_time).total_seconds() / 60
+    new_signal = age_min < (tf_minutes * 1.5)  # ventana = 1.5x el tf
+
+# Mantener registro de última señal mostrada con sonido
+if 'last_signal_played' not in st.session_state:
+    st.session_state.last_signal_played = None
+
+play_sound = False
+if sound_on and new_signal and last_signal_time:
+    sig_id = f"{last_signal_time.isoformat()}_{last_signal_type}"
+    if st.session_state.last_signal_played != sig_id:
+        play_sound = True
+        st.session_state.last_signal_played = sig_id
+
+# ============================================================
+# STATUS BAR (estilo TradingView)
+# ============================================================
+last_price = float(df['Close'].iloc[-1])
+prev_price = float(df['Close'].iloc[-2])
 price_change = ((last_price - prev_price) / prev_price) * 100
+day_high = float(df['High'].tail(int(1440/max(tf_minutes,1))).max()) if len(df) > 1 else last_price
+day_low = float(df['Low'].tail(int(1440/max(tf_minutes,1))).min()) if len(df) > 1 else last_price
 
-col_t1, col_t2 = st.columns([3, 1])
-with col_t1:
-    st.title(f"🥇 {sym_label.split(' ')[0]} • {tf_label}")
-with col_t2:
-    st.metric("Precio actual", f"${last_price:,.2f}", f"{price_change:+.3f}%")
+active_sessions = get_session_now()
+market_open = is_market_open()
 
-# Panel de fuerza
-col1, col2, col3, col4, col5, col6 = st.columns(6)
+# Top status bar HTML
+sessions_html = ""
+for sname, scolor in [("Sídney", "#FF6B35"), ("Tokio", "#FFD700"),
+                       ("Londres", "#4FC3F7"), ("Nueva York", "#9C27B0")]:
+    is_active = any(s[0] == sname for s in active_sessions)
+    cls = "session-active" if is_active else "session-closed"
+    if is_active:
+        sessions_html += f'<span class="{cls}" style="background: {scolor};">● {sname}</span> '
+    else:
+        sessions_html += f'<span class="{cls}">○ {sname}</span> '
 
-d_label = "🟢 ALCISTA" if d_trend == 1 else "🔴 BAJISTA" if d_trend == -1 else "🟡 LATERAL"
-col1.metric("📅 Tendencia Diaria", d_label, f"{d_change:+.2f}% hoy")
+market_status = '<span style="color:#26a69a;">● MERCADO ABIERTO</span>' if market_open else '<span style="color:#EF5350;">● MERCADO CERRADO</span>'
+price_color = "#26a69a" if price_change >= 0 else "#ef5350"
+arrow = "▲" if price_change >= 0 else "▼"
 
-adx_now = float(adx_v.iloc[-1]) if not pd.isna(adx_v.iloc[-1]) else 0
-adx_status = "💪 FUERTE" if adx_now >= adx_threshold else "😴 DÉBIL"
-col2.metric("⚡ ADX", f"{adx_now:.1f}", adx_status)
+now_str = datetime.now(pytz.UTC).strftime('%H:%M:%S UTC')
 
-av2_label = "🟢 ALCISTA" if av2_bull.iloc[-1] else "🔴 BAJISTA"
-col3.metric("📈 A-V2", av2_label)
+st.markdown(f"""
+<div class="status-bar">
+    <div>
+        <strong style="font-size:0.95rem; color:#FFD700;">🥇 {sym_label.split(' ')[0]}</strong>
+        <span style="color:white; margin-left:10px; font-size:0.95rem;">${last_price:,.2f}</span>
+        <span style="color:{price_color}; margin-left:6px;">{arrow} {price_change:+.3f}%</span>
+        <span style="margin-left:14px; color:#787b86;">H: <span style="color:#d1d4dc;">${day_high:,.2f}</span></span>
+        <span style="margin-left:8px; color:#787b86;">L: <span style="color:#d1d4dc;">${day_low:,.2f}</span></span>
+        <span style="margin-left:14px;">{tf_label}</span>
+    </div>
+    <div style="text-align:right;">
+        {sessions_html}
+        <span style="margin-left:10px;">{market_status}</span>
+        <span style="margin-left:10px; color:#787b86;">{now_str}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-st_label = "🟢 ALCISTA" if trend_st.iloc[-1] == 1 else "🔴 BAJISTA"
-col4.metric("📊 Supertrend", st_label)
-
-qqe_label = "🔵 COMPRA" if blue_bar.iloc[-1] else "🔴 VENTA" if red_bar.iloc[-1] else "⚪ NEUTRAL"
-col5.metric("🎯 QQE", qqe_label)
-
-# Score total
+# ============================================================
+# PANEL DE CONFIRMACIONES (mini, una línea)
+# ============================================================
 score_l = sum([
     20 if av2_bull.iloc[-1] else 0,
     20 if trend_st.iloc[-1] == 1 else 0,
@@ -371,81 +596,111 @@ score_s = sum([
 final_score = max(score_l, score_s)
 direction = "🟢 LARGO" if score_l >= score_s else "🔴 CORTO"
 score_emoji = "✅" if final_score >= 80 else "⚠️" if final_score >= 60 else "❌"
-col6.metric("💪 FUERZA TOTAL", f"{score_emoji} {final_score}%", direction)
 
-# Recomendación
-if final_score >= 80:
-    st.success(f"✅ **OPERAR {direction}** - Triple confirmación + tendencia diaria a favor + ADX fuerte")
-elif final_score >= 60:
-    st.warning(f"⚠️ **ESPERAR mejor entrada** - Confirmación parcial ({final_score}%)")
-else:
-    st.error(f"❌ **NO OPERAR** - Sin confirmación clara ({final_score}%)")
+stoch_now = float(stoch_k_v.iloc[-1]) if not pd.isna(stoch_k_v.iloc[-1]) else 50
+stoch_status = "🔴 SOBRECOMPRA" if stoch_now > 80 else "🟢 SOBREVENTA" if stoch_now < 20 else "⚪ NEUTRAL"
+adx_now = float(adx_v.iloc[-1]) if not pd.isna(adx_v.iloc[-1]) else 0
+
+c1, c2, c3, c4, c5, c6, c7 = st.columns([1, 1, 1, 1, 1, 1, 1.4])
+d_label = "🟢 ALCISTA" if d_trend == 1 else "🔴 BAJISTA" if d_trend == -1 else "🟡 LATERAL"
+c1.metric("📅 Daily", d_label, f"{d_change:+.2f}%")
+c2.metric("⚡ ADX", f"{adx_now:.1f}", "FUERTE" if adx_now >= adx_threshold else "DÉBIL")
+c3.metric("📈 A-V2", "ALCISTA" if av2_bull.iloc[-1] else "BAJISTA")
+c4.metric("📊 ST", "ALCISTA" if trend_st.iloc[-1] == 1 else "BAJISTA")
+c5.metric("🎯 QQE", "COMPRA" if blue_bar.iloc[-1] else "VENTA" if red_bar.iloc[-1] else "—")
+c6.metric("📉 Stoch", f"{stoch_now:.0f}", stoch_status)
+c7.metric("💪 FUERZA", f"{score_emoji} {final_score}%", direction)
 
 # ============================================================
-# GRÁFICO PRINCIPAL CON PLOTLY (zoom, dibujo, etc.)
+# GRÁFICO PRINCIPAL (estilo TradingView)
 # ============================================================
 df_show = df.tail(candles_to_show).copy()
 ha_o_s = ha_o_smooth.tail(candles_to_show)
 ha_c_s = ha_c_smooth.tail(candles_to_show)
-ha_h_s = ha_h_smooth.tail(candles_to_show)
-ha_l_s = ha_l_smooth.tail(candles_to_show)
 trend_st_s = trend_st.tail(candles_to_show)
 st_upper_s = st_upper.tail(candles_to_show)
 st_lower_s = st_lower.tail(candles_to_show)
+ema20_s = ema20_v.tail(candles_to_show)
+ema100_s = ema100_v.tail(candles_to_show)
+bb_basis_s = bb_basis.tail(candles_to_show)
+bb_upper_s = bb_upper.tail(candles_to_show)
+bb_lower_s = bb_lower.tail(candles_to_show)
 adx_s = adx_v.tail(candles_to_show)
 plus_di_s = plus_di.tail(candles_to_show)
 minus_di_s = minus_di.tail(candles_to_show)
+stoch_k_s = stoch_k_v.tail(candles_to_show)
+stoch_d_s = stoch_d_v.tail(candles_to_show)
 long_cond_s = long_cond.tail(candles_to_show)
 short_cond_s = short_cond.tail(candles_to_show)
 
 fig = make_subplots(
-    rows=2, cols=1,
+    rows=3, cols=1,
     shared_xaxes=True,
-    vertical_spacing=0.03,
-    row_heights=[0.75, 0.25],
-    subplot_titles=("", "ADX & DMI")
+    vertical_spacing=0.015,
+    row_heights=[0.66, 0.17, 0.17],
 )
 
-# Velas reales
+# ---------- ROW 1: PRECIO ----------
+# Sesiones (background)
+if show_sessions:
+    add_session_shading(fig, df_show)
+
+# Velas
 fig.add_trace(go.Candlestick(
     x=df_show.index,
     open=df_show['Open'], high=df_show['High'],
     low=df_show['Low'], close=df_show['Close'],
     name='Precio',
-    increasing_line_color='#26A69A',
-    decreasing_line_color='#EF5350',
-    increasing_fillcolor='#26A69A',
-    decreasing_fillcolor='#EF5350',
+    increasing_line_color='#26A69A', decreasing_line_color='#EF5350',
+    increasing_fillcolor='#26A69A', decreasing_fillcolor='#EF5350',
+    line=dict(width=1),
+    showlegend=False,
 ), row=1, col=1)
 
-# Nube A-V2
-trend_color = ['rgba(38,166,154,0.3)' if c >= o else 'rgba(239,83,80,0.3)'
-               for c, o in zip(ha_c_s, ha_o_s)]
-fig.add_trace(go.Scatter(x=ha_c_s.index, y=ha_o_s, mode='lines',
-                          line=dict(color='rgba(0,0,0,0)', width=0),
-                          showlegend=False, hoverinfo='skip'), row=1, col=1)
-fig.add_trace(go.Scatter(x=ha_c_s.index, y=ha_c_s, mode='lines',
-                          line=dict(color='rgba(0,0,0,0)', width=0),
-                          fill='tonexty', fillcolor='rgba(38,166,154,0.15)',
-                          name='A-V2 Cloud', hoverinfo='skip'), row=1, col=1)
+# Bollinger Bands
+if show_bb:
+    fig.add_trace(go.Scatter(x=bb_upper_s.index, y=bb_upper_s, mode='lines',
+                              line=dict(color='#FFA726', width=2),
+                              name='BB Upper', opacity=0.85), row=1, col=1)
+    fig.add_trace(go.Scatter(x=bb_basis_s.index, y=bb_basis_s, mode='lines',
+                              line=dict(color='#FFA726', width=1.5, dash='dot'),
+                              name='BB Basis', opacity=0.7), row=1, col=1)
+    fig.add_trace(go.Scatter(x=bb_lower_s.index, y=bb_lower_s, mode='lines',
+                              line=dict(color='#FFA726', width=2),
+                              fill='tonexty', fillcolor='rgba(255,167,38,0.06)',
+                              name='BB Lower', opacity=0.85), row=1, col=1)
 
-fig.add_trace(go.Scatter(x=ha_h_s.index, y=ha_h_s, mode='lines',
-                          line=dict(color='gray', width=1, dash='dot'),
-                          name='HA High smooth', opacity=0.5), row=1, col=1)
-fig.add_trace(go.Scatter(x=ha_l_s.index, y=ha_l_s, mode='lines',
-                          line=dict(color='gray', width=1, dash='dot'),
-                          name='HA Low smooth', opacity=0.5), row=1, col=1)
+# EMAs (gruesas, colores muy distintos)
+if show_ema20:
+    fig.add_trace(go.Scatter(x=ema20_s.index, y=ema20_s, mode='lines',
+                              line=dict(color='#00E5FF', width=2.5),
+                              name='EMA 20'), row=1, col=1)
+if show_ema100:
+    fig.add_trace(go.Scatter(x=ema100_s.index, y=ema100_s, mode='lines',
+                              line=dict(color='#E040FB', width=2.5),
+                              name='EMA 100'), row=1, col=1)
+
+# Nube A-V2 (sutil)
+if show_cloud:
+    fig.add_trace(go.Scatter(x=ha_o_s.index, y=ha_o_s, mode='lines',
+                              line=dict(color='rgba(0,0,0,0)', width=0),
+                              showlegend=False, hoverinfo='skip'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=ha_c_s.index, y=ha_c_s, mode='lines',
+                              line=dict(color='rgba(0,0,0,0)', width=0),
+                              fill='tonexty', fillcolor='rgba(38,166,154,0.10)',
+                              name='A-V2 Cloud', hoverinfo='skip',
+                              showlegend=False), row=1, col=1)
 
 # Supertrend
 if show_st_lines:
     st_up_plot = st_upper_s.where(trend_st_s == 1)
     st_dn_plot = st_lower_s.where(trend_st_s == -1)
     fig.add_trace(go.Scatter(x=st_up_plot.index, y=st_up_plot, mode='lines',
-                              line=dict(color='#00ff00', width=2),
-                              name='Supertrend Up'), row=1, col=1)
+                              line=dict(color='#00C853', width=2.5),
+                              name='ST Up'), row=1, col=1)
     fig.add_trace(go.Scatter(x=st_dn_plot.index, y=st_dn_plot, mode='lines',
-                              line=dict(color='#ff0000', width=2),
-                              name='Supertrend Down'), row=1, col=1)
+                              line=dict(color='#FF1744', width=2.5),
+                              name='ST Down'), row=1, col=1)
 
 # Señales BUY/SELL
 if show_signals:
@@ -453,99 +708,185 @@ if show_signals:
     sell_pts = df_show[short_cond_s]
     if not buy_pts.empty:
         fig.add_trace(go.Scatter(
-            x=buy_pts.index, y=buy_pts['Low'] * 0.999,
+            x=buy_pts.index, y=buy_pts['Low'] * 0.9985,
             mode='markers+text', text=['BUY'] * len(buy_pts),
             textposition='bottom center',
-            textfont=dict(color='lime', size=11, family='Arial Black'),
-            marker=dict(symbol='triangle-up', size=14, color='lime',
-                        line=dict(color='white', width=1)),
-            name='BUY signal'), row=1, col=1)
+            textfont=dict(color='#00E676', size=10, family='Arial Black'),
+            marker=dict(symbol='triangle-up', size=14, color='#00E676',
+                        line=dict(color='white', width=1.5)),
+            name='BUY', showlegend=False), row=1, col=1)
     if not sell_pts.empty:
         fig.add_trace(go.Scatter(
-            x=sell_pts.index, y=sell_pts['High'] * 1.001,
+            x=sell_pts.index, y=sell_pts['High'] * 1.0015,
             mode='markers+text', text=['SELL'] * len(sell_pts),
             textposition='top center',
-            textfont=dict(color='red', size=11, family='Arial Black'),
-            marker=dict(symbol='triangle-down', size=14, color='red',
-                        line=dict(color='white', width=1)),
-            name='SELL signal'), row=1, col=1)
+            textfont=dict(color='#FF1744', size=10, family='Arial Black'),
+            marker=dict(symbol='triangle-down', size=14, color='#FF1744',
+                        line=dict(color='white', width=1.5)),
+            name='SELL', showlegend=False), row=1, col=1)
 
-# ADX subplot
+# ---------- ROW 2: ADX ----------
 fig.add_trace(go.Scatter(x=adx_s.index, y=adx_s, mode='lines',
                           line=dict(color='#FFD700', width=2),
-                          name='ADX'), row=2, col=1)
+                          name='ADX', showlegend=False), row=2, col=1)
 fig.add_trace(go.Scatter(x=plus_di_s.index, y=plus_di_s, mode='lines',
-                          line=dict(color='#26A69A', width=1.5),
-                          name='DI+'), row=2, col=1)
+                          line=dict(color='#26A69A', width=1.3),
+                          name='DI+', showlegend=False), row=2, col=1)
 fig.add_trace(go.Scatter(x=minus_di_s.index, y=minus_di_s, mode='lines',
-                          line=dict(color='#EF5350', width=1.5),
-                          name='DI-'), row=2, col=1)
-fig.add_hline(y=adx_threshold, line=dict(color='white', width=1, dash='dash'),
-              row=2, col=1)
+                          line=dict(color='#EF5350', width=1.3),
+                          name='DI-', showlegend=False), row=2, col=1)
+fig.add_hline(y=adx_threshold, line=dict(color='#787b86', width=1, dash='dash'), row=2, col=1)
+fig.add_annotation(text="ADX", xref="x2 domain", yref="y2 domain",
+                    x=0.01, y=0.95, showarrow=False,
+                    font=dict(size=10, color="#FFD700"), row=2, col=1)
 
-# Layout con HERRAMIENTAS DE DIBUJO
+# ---------- ROW 3: STOCHASTIC ----------
+fig.add_trace(go.Scatter(x=stoch_k_s.index, y=stoch_k_s, mode='lines',
+                          line=dict(color='#42A5F5', width=2),
+                          name='%K', showlegend=False), row=3, col=1)
+fig.add_trace(go.Scatter(x=stoch_d_s.index, y=stoch_d_s, mode='lines',
+                          line=dict(color='#FF7043', width=2),
+                          name='%D', showlegend=False), row=3, col=1)
+# Líneas 20/80
+fig.add_hline(y=80, line=dict(color='#EF5350', width=1, dash='dash'), row=3, col=1)
+fig.add_hline(y=20, line=dict(color='#26A69A', width=1, dash='dash'), row=3, col=1)
+# Zonas sombreadas sobrecompra/sobreventa
+fig.add_hrect(y0=80, y1=100, fillcolor="rgba(239,83,80,0.10)", line_width=0, row=3, col=1)
+fig.add_hrect(y0=0, y1=20, fillcolor="rgba(38,166,154,0.10)", line_width=0, row=3, col=1)
+fig.add_annotation(text="Stoch %K %D", xref="x3 domain", yref="y3 domain",
+                    x=0.01, y=0.95, showarrow=False,
+                    font=dict(size=10, color="#42A5F5"), row=3, col=1)
+
+# ============================================================
+# LAYOUT (TradingView-style)
+# ============================================================
 fig.update_layout(
     template='plotly_dark',
-    height=750,
-    margin=dict(l=10, r=10, t=30, b=10),
+    height=720,
+    margin=dict(l=8, r=8, t=8, b=8),
     showlegend=True,
-    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+    legend=dict(
+        orientation='h', yanchor='top', y=1.0, xanchor='left', x=0,
+        bgcolor='rgba(19,23,34,0.7)', bordercolor='#2a2e39', borderwidth=1,
+        font=dict(size=10, color='#d1d4dc'),
+    ),
     xaxis_rangeslider_visible=False,
-    dragmode='pan',  # Por defecto pan; puede cambiar a drawing en modebar
-    newshape=dict(line=dict(color='cyan', width=2)),
+    dragmode='pan',
+    newshape=dict(line=dict(color='#FFD700', width=2)),
     hovermode='x unified',
+    paper_bgcolor='#131722',
+    plot_bgcolor='#131722',
+    font=dict(family='Trebuchet MS, sans-serif', size=10, color='#d1d4dc'),
 )
 
-# Ocultar gaps (fines de semana, horas no trading)
-fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])] if tf_minutes < 1440 else [])
+# Grilla y ejes (estilo TradingView)
+for r in [1, 2, 3]:
+    fig.update_xaxes(
+        gridcolor='#1e222d', gridwidth=1,
+        zeroline=False, showspikes=True,
+        spikecolor='#787b86', spikethickness=1, spikedash='solid',
+        spikemode='across', row=r, col=1,
+    )
+    fig.update_yaxes(
+        gridcolor='#1e222d', gridwidth=1,
+        zeroline=False, showspikes=True,
+        spikecolor='#787b86', spikethickness=1, spikedash='solid',
+        side='right', row=r, col=1,
+    )
 
-# Configuración de modebar con TODAS las herramientas de dibujo
+# Range breaks (ocultar fines de semana en intraday)
+if tf_minutes < 1440:
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+
+# Stoch escala fija
+fig.update_yaxes(range=[0, 100], row=3, col=1)
+
+# ============================================================
+# CONFIG con todas las herramientas de dibujo
+# ============================================================
 config = {
     'scrollZoom': True,
     'displayModeBar': True,
     'displaylogo': False,
     'modeBarButtonsToAdd': [
         'drawline', 'drawopenpath', 'drawclosedpath',
-        'drawcircle', 'drawrect', 'eraseshape'
+        'drawcircle', 'drawrect', 'eraseshape',
     ],
-    'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+    'modeBarButtonsToRemove': ['lasso2d', 'select2d', 'autoScale2d'],
     'toImageButtonOptions': {
         'format': 'png',
         'filename': f'TAV3_GOLD_{tf_label}',
-        'height': 800, 'width': 1600, 'scale': 2
-    }
+        'height': 900, 'width': 1800, 'scale': 2,
+    },
 }
-
 st.plotly_chart(fig, use_container_width=True, config=config)
 
 # ============================================================
-# TABLA DE SEÑALES RECIENTES
+# SONIDO DE CAMPANA EN SEÑAL NUEVA
 # ============================================================
-with st.expander("📋 Últimas señales detectadas", expanded=False):
+if play_sound:
+    sound_color = "#00E676" if last_signal_type == "BUY" else "#FF1744"
+    components.html(f"""
+    <script>
+        // Sonido de campana usando Web Audio API (sin archivo externo)
+        try {{
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const playBell = (freq, duration, delay) => {{
+                setTimeout(() => {{
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + duration);
+                }}, delay);
+            }};
+            // Campana doble
+            playBell(880, 0.4, 0);
+            playBell(1320, 0.4, 100);
+            playBell(880, 0.6, 250);
+        }} catch(e) {{ console.log('Audio error:', e); }}
+    </script>
+    <div style="background: {sound_color}; color: white; padding: 8px 16px;
+                border-radius: 4px; text-align: center; font-weight: bold;
+                font-size: 0.85rem; margin-top: 4px;">
+        🔔 NUEVA SEÑAL: {last_signal_type} @ ${df.loc[last_signal_time, 'Close']:,.2f}
+    </div>
+    """, height=60)
+
+# ============================================================
+# RECOMENDACIÓN
+# ============================================================
+if final_score >= 80:
+    st.success(f"✅ **OPERAR {direction}** — Triple confirmación + tendencia diaria a favor + ADX fuerte ({final_score}%)")
+elif final_score >= 60:
+    st.warning(f"⚠️ **ESPERAR mejor entrada** — Confirmación parcial ({final_score}%)")
+else:
+    st.error(f"❌ **NO OPERAR** — Sin confirmación clara ({final_score}%)")
+
+# ============================================================
+# TABLA DE SEÑALES
+# ============================================================
+with st.expander("📋 Últimas señales", expanded=False):
     signals = []
     for idx in df.index[long_cond]:
-        signals.append({
-            'Fecha/Hora': idx,
-            'Tipo': '🟢 BUY',
-            'Precio': df.loc[idx, 'Close'],
-            'ADX': adx_v.loc[idx] if idx in adx_v.index else None,
-        })
+        signals.append({'Hora': idx, 'Tipo': '🟢 BUY',
+                       'Precio': df.loc[idx, 'Close'],
+                       'ADX': adx_v.loc[idx] if idx in adx_v.index else None})
     for idx in df.index[short_cond]:
-        signals.append({
-            'Fecha/Hora': idx,
-            'Tipo': '🔴 SELL',
-            'Precio': df.loc[idx, 'Close'],
-            'ADX': adx_v.loc[idx] if idx in adx_v.index else None,
-        })
+        signals.append({'Hora': idx, 'Tipo': '🔴 SELL',
+                       'Precio': df.loc[idx, 'Close'],
+                       'ADX': adx_v.loc[idx] if idx in adx_v.index else None})
     if signals:
-        df_sig = pd.DataFrame(signals).sort_values('Fecha/Hora', ascending=False).head(20)
+        df_sig = pd.DataFrame(signals).sort_values('Hora', ascending=False).head(20)
         df_sig['ADX'] = df_sig['ADX'].apply(lambda x: f"{x:.1f}" if x else "-")
         df_sig['Precio'] = df_sig['Precio'].apply(lambda x: f"${x:,.2f}")
         st.dataframe(df_sig, use_container_width=True, hide_index=True)
     else:
-        st.info("Aún no hay señales en este rango de datos.")
+        st.info("Sin señales aún.")
 
-# Footer
-st.caption("📊 Datos en tiempo real desde Yahoo Finance · Actualización automática cada 60s · "
-           "Herramientas de dibujo: usa los iconos en la barra superior del gráfico (línea, rectángulo, círculo, lápiz, borrador) · "
-           "Zoom: rueda del mouse o click+arrastrar")
+st.caption(f"📡 Yahoo Finance · Auto-refresh 30s · Delay ~15min · Herramientas dibujo en barra superior del gráfico")
